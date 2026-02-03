@@ -1,49 +1,39 @@
-# 这个工作流的名称
 name: Android CI
 
-# 控制工作流触发的条件
 on:
-  # 在 master 分支上发生 push 事件时触发
   push:
     branches: [ "master" ]
-  # 在 master 分支上发起 pull request 事件时触发
   pull_request:
     branches: [ "master" ]
 
-# 工作流运行的任务
 jobs:
   build:
-    # 任务运行的虚拟机环境
     runs-on: ubuntu-latest
 
     steps:
-    # 步骤1: 检出你的仓库代码
+    # 1. 检出代码 (升级到 v4)
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    # 步骤2: 设置Java环境 (对于旧的Android项目，JDK 8 或 11 比较合适)
-    - name: Set up JDK 11
-      uses: actions/setup-java@v3
+    # 2. 设置 JDK 8 (老项目必须用 JDK 8，否则 Gradle 会报错)
+    - name: Set up JDK 8
+      uses: actions/setup-java@v4
       with:
-        java-version: '11'
+        java-version: '8'
         distribution: 'temurin'
         cache: 'gradle'
 
-    # 步骤3: 授予 gradlew 执行权限
-    # 在Linux/Mac环境下，需要给gradlew脚本添加执行权限
+    # 3. 赋予 gradlew 执行权限
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # 步骤4: 使用Gradle编译项目
-    # assembleDebug 会编译并打包一个debug版本的APK
+    # 4. 编译 (使用 assembleDebug)
     - name: Build with Gradle
-      run: ./gradlew assembleDebug
-
-    # 步骤5 (可选): 上传编译产物 (APK)
-    # 这样你就可以在Actions页面下载编译好的APK文件了
+      run: ./gradlew assembleDebug --stacktrace
+      
+    # 5. 上传 APK (关键修正：升级到 v4)
     - name: Upload APK
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: app-debug.apk
         path: app/build/outputs/apk/debug/app-debug.apk
-
