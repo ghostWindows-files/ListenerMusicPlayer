@@ -1,29 +1,49 @@
-name: Build APK
+# 这个工作流的名称
+name: Android CI
 
-on: [push]
+# 控制工作流触发的条件
+on:
+  # 在 master 分支上发生 push 事件时触发
+  push:
+    branches: [ "master" ]
+  # 在 master 分支上发起 pull request 事件时触发
+  pull_request:
+    branches: [ "master" ]
+
+# 工作流运行的任务
 jobs:
   build:
-    runs-on: ubuntu-20.04 # 使用较旧的 Ubuntu 以兼容老环境
+    # 任务运行的虚拟机环境
+    runs-on: ubuntu-latest
 
     steps:
-    - [...](asc_slot://start-slot-16)uses: actions/checkout@v3
+    # 步骤1: 检出你的仓库代码
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-    - [...](asc_slot://start-slot-18)name: Set up JDK 1.8
+    # 步骤2: 设置Java环境 (对于旧的Android项目，JDK 8 或 11 比较合适)
+    - name: Set up JDK 11
       uses: actions/setup-java@v3
       with:
-        java-version: '8'
+        java-version: '11'
         distribution: 'temurin'
-        cache: gradle
+        cache: 'gradle'
 
-    - [...](asc_slot://start-slot-20)name: Grant execute permission for gradlew
+    # 步骤3: 授予 gradlew 执行权限
+    # 在Linux/Mac环境下，需要给gradlew脚本添加执行权限
+    - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    # 步骤4: 使用Gradle编译项目
+    # assembleDebug 会编译并打包一个debug版本的APK
     - name: Build with Gradle
-      # [...](asc_slot://start-slot-22)尝试使用 assembleDebug，忽略部分过时错误
-      run: ./gradlew assembleDebug --stacktrace
+      run: ./gradlew assembleDebug
 
-    - [...](asc_slot://start-slot-24)name: Upload APK
+    # 步骤5 (可选): 上传编译产物 (APK)
+    # 这样你就可以在Actions页面下载编译好的APK文件了
+    - name: Upload APK
       uses: actions/upload-artifact@v3
       with:
-        name: app-debug
+        name: app-debug.apk
         path: app/build/outputs/apk/debug/app-debug.apk
+
