@@ -15,7 +15,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 2. 设置 JDK 8 (Gradle 4.x 最佳搭档)
+    # 2. 设置 JDK 8
     - name: Set up JDK 8
       uses: actions/setup-java@v4
       with:
@@ -23,14 +23,12 @@ jobs:
         distribution: 'temurin'
         cache: 'gradle'
 
-    # 3. 强制升级 Gradle Wrapper (2.14 -> 4.10.1)
-    # 只有升级到这里，才能解决 XML 解析报错
+    # 3. 升级 Gradle Wrapper (2.14 -> 4.10.1)
     - name: Upgrade Gradle Wrapper
       run: |
         sed -i 's/gradle-2.14.1-all.zip/gradle-4.10.1-all.zip/' gradle/wrapper/gradle-wrapper.properties
 
-    # 4. 【暴力覆盖】重写根目录 build.gradle
-    # 使用 AGP 3.3.2 插件，彻底解决 'extension-level' XML 报错
+    # 4. 重写根目录 build.gradle (使用 AGP 3.3.2 + 阿里云)
     - name: Overwrite Root build.gradle
       run: |
         cat > build.gradle <<EOF
@@ -41,7 +39,6 @@ jobs:
                 maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
             }
             dependencies {
-                // 升级插件到 3.3.2，这是救活老项目的关键
                 classpath 'com.android.tools.build:gradle:3.3.2'
             }
         }
@@ -57,17 +54,13 @@ jobs:
         }
         EOF
 
-    # 5. 【暴力覆盖】重写 app/build.gradle
-    # 1. 删除 AndResGuard (如你所愿)
-    # 2. 语法升级 (compile -> implementation)
-    # 3. 修复 apt
+    # 5. 重写 app/build.gradle (升级 SDK 到 28，修复 apt)
     - name: Overwrite App build.gradle
       run: |
         cat > app/build.gradle <<EOF
         apply plugin: 'com.android.application'
 
         android {
-            // 升级编译版本，配合 Gradle 4.10
             compileSdkVersion 28
             buildToolsVersion "28.0.3"
 
@@ -81,15 +74,11 @@ jobs:
                 renderscriptTargetApi 21
                 renderscriptSupportModeEnabled true
                 resConfigs "zh","en"
-                
-                // 必须加这个，防止 dimension 报错
                 flavorDimensions "default"
-                
                 ndk {
                     abiFilters "armeabi", "armeabi-v7a" ,"x86"
                 }
             }
-
             buildTypes {
                 release {
                     minifyEnabled true
@@ -101,8 +90,6 @@ jobs:
                     versionNameSuffix "_debug"
                 }
             }
-            
-            // 指定 Java 8 编译
             compileOptions {
                 sourceCompatibility 1.8
                 targetCompatibility 1.8
@@ -111,28 +98,21 @@ jobs:
 
         dependencies {
             implementation fileTree(dir: 'libs', include: ['*.jar'])
-            
-            // 测试库
-            androidTestImplementation('com.android.support.test.espresso:espresso-core:2.2.2', {
-                exclude group: 'com.android.support', module: 'support-annotations'
-            })
             testImplementation 'junit:junit:4.12'
-
-            // Support 库
+            
+            // Support Libraries
             implementation 'com.android.support:appcompat-v7:24.2.1'
             implementation 'com.android.support:recyclerview-v7:24.2.1'
             implementation 'com.android.support:cardview-v7:24.2.1'
             implementation 'com.android.support:palette-v7:24.2.1'
             implementation 'com.android.support:design:24.2.1'
 
-            // RxJava
+            // Third Party
             implementation 'io.reactivex:rxandroid:1.2.1'
             implementation 'io.reactivex:rxjava:1.1.6'
-
-            // Glide
             implementation 'com.github.bumptech.glide:glide:3.7.0'
-
-            // ButterKnife (apt -> annotationProcessor)
+            
+            // ButterKnife
             implementation 'com.jakewharton:butterknife:8.4.0'
             annotationProcessor 'com.jakewharton:butterknife-compiler:8.4.0'
 
@@ -142,39 +122,37 @@ jobs:
             implementation 'com.squareup.retrofit2:adapter-rxjava:2.0.1'
             implementation 'com.squareup.okhttp3:logging-interceptor:3.3.0'
 
-            // MaterialIcon
             implementation 'net.steamcrafted:materialiconlib:1.1.1'
-
-            // Dagger2 (apt -> annotationProcessor)
+            implementation 'com.afollestad.material-dialogs:core:0.9.1.0'
+            implementation 'com.nostra13.universalimageloader:universal-image-loader:1.9.4'
+            implementation 'com.sothree.slidinguppanel:library:3.3.1'
+            
+            // Dagger
             implementation 'com.google.dagger:dagger:2.0'
             annotationProcessor 'com.google.dagger:dagger-compiler:2.0'
             compileOnly 'org.glassfish:javax.annotation:10.0-b28'
 
-            // MaterialDialogs
-            implementation 'com.afollestad.material-dialogs:core:0.9.1.0'
-
-            // ImageLoader
-            implementation 'com.nostra13.universalimageloader:universal-image-loader:1.9.4'
-
-            // SlidingUpPanel
-            implementation 'com.sothree.slidinguppanel:library:3.3.1'
-
-            // App Theme Engine
             implementation('com.github.naman14:app-theme-engine:0.5.2@aar') {
                 transitive = true
             }
         }
         EOF
 
-    # 6. 赋予执行权限
+    # 6. 【新增】自动修复 Java 源码报错
+    # 替换过时的 canvas.save(FLAG) 为 canvas.save()
+    - name: Fix Java Source Code (API 28 Compatibility)
+      run: |
+        sed -i 's/canvas.save(Canvas.MATRIX_SAVE_FLAG)/canvas.save()/g' app/src/main/java/io/hefuyi/listener/widget/fastscroller/FastScrollPopup.java
+
+    # 7. 赋予执行权限
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # 7. 编译
+    # 8. 编译
     - name: Build with Gradle
       run: ./gradlew assembleDebug --stacktrace
 
-    # 8. 上传
+    # 9. 上传
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
