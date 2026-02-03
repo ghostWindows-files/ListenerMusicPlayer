@@ -15,7 +15,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 2. 设置 JDK 8 (配合 Gradle 2.14 必须用这个)
+    # 2. 设置 JDK 8
     - name: Set up JDK 8
       uses: actions/setup-java@v4
       with:
@@ -23,49 +23,53 @@ jobs:
         distribution: 'temurin'
         cache: 'gradle'
 
-    # 3. 【核心步骤】使用 Python 脚本精准替换仓库源
-    # 不删任何插件，只是把下载地址指向阿里云
-    - name: Switch to Aliyun Mirrors
-      shell: python
+    # 3. 【暴力重写】直接覆盖根目录 build.gradle
+    # 确保 MavenCentral (美国节点) 排在第一位，Aliyun (中国节点) 排在最后只做替补
+    - name: Overwrite root build.gradle
       run: |
-        import os
+        cat > build.gradle <<EOF
+        buildscript {
+            repositories {
+                mavenCentral()
+                maven { url 'https://maven.google.com' }
+                maven { url 'https://maven.aliyun.com/repository/public' }
+            }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:2.2.0'
+                classpath 'com.neenbedankt.gradle.plugins:android-apt:1.8'
+                classpath 'com.tencent.mm:AndResGuard-gradle-plugin:1.2.0'
+            }
+        }
+        allprojects {
+            repositories {
+                mavenCentral()
+                maven { url 'https://maven.google.com' }
+                maven { url 'https://maven.aliyun.com/repository/public' }
+                maven { url "https://jitpack.io" }
+            }
+        }
+        task clean(type: Delete) {
+            delete rootProject.buildDir
+        }
+        EOF
 
-        # 定义阿里云的仓库配置（包含 Google 和 JCenter/Central 的镜像）
-        aliyun_repos = """
-        maven { url 'https://maven.aliyun.com/repository/google' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
-        """
+    # 4. 【修复报错】手动创建 analytics.settings 防止 Crash
+    # 这一步专门解决 FileNotFoundException
+    - name: Fix Android Analytics Crash
+      run: |
+        mkdir -p /home/runner/.android
+        touch /home/runner/.android/analytics.settings
+        chmod 777 /home/runner/.android/analytics.settings
 
-        file_path = 'build.gradle'
-        
-        print(f"Reading {file_path}...")
-        with open(file_path, 'r') as f:
-            content = f.read()
-
-        # 将所有的 jcenter() 替换为阿里云镜像
-        if 'jcenter()' in content:
-            new_content = content.replace('jcenter()', aliyun_repos)
-            
-            with open(file_path, 'w') as f:
-                f.write(new_content)
-            print("SUCCESS: Replaced jcenter() with Aliyun mirrors.")
-        else:
-            print("WARNING: jcenter() not found, skipping replacement.")
-            
-        # 顺便打印一下修改后的文件，方便你在日志里检查
-        print("-" * 20)
-        print(new_content)
-        print("-" * 20)
-
-    # 4. 赋予 gradlew 执行权限
+    # 5. 赋予 gradlew 执行权限
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # 5. 编译 (带堆栈日志，方便排错)
+    # 6. 编译 (禁用守护进程以节省内存)
     - name: Build with Gradle
-      run: ./gradlew assembleDebug --stacktrace
+      run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-    # 6. 上传 APK
+    # 7. 上传 APK
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
