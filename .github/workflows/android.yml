@@ -15,7 +15,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 2. 设置 JDK 8 (必须)
+    # 2. 设置 JDK 8 (老项目必须)
     - name: Set up JDK 8
       uses: actions/setup-java@v4
       with:
@@ -23,38 +23,82 @@ jobs:
         distribution: 'temurin'
         cache: 'gradle'
 
-    # 3. 【核心步骤】对Gradle配置进行“外科手术”
-    - name: Fix Obsolete Gradle Configuration
+    # 3. 升级 Gradle Wrapper (2.14 -> 4.10.1)
+    - name: Upgrade Gradle Wrapper
       run: |
-        # 3.1: 升级 Gradle 版本 (从 2.14.1 -> 4.10.1)
-        echo ">> 1. Upgrading Gradle Wrapper..."
         sed -i 's/gradle-2.14.1-all.zip/gradle-4.10.1-all.zip/' gradle/wrapper/gradle-wrapper.properties
 
-        # 3.2: 升级根 build.gradle，替换仓库，升级安卓插件，删除已失效的插件
-        echo ">> 2. Patching root build.gradle..."
+    # 4. 修复根目录 build.gradle (仓库 & 插件版本)
+    - name: Patch root build.gradle
+      run: |
+        # 替换 jcenter 为 google + mavenCentral
         sed -i 's/jcenter()/google()\n        mavenCentral()/' build.gradle
+        # 升级 Android Gradle 插件 2.2.0 -> 3.3.2
         sed -i "s/com.android.tools.build:gradle:2.2.0/com.android.tools.build:gradle:3.3.2/" build.gradle
+        # 删除根目录失效插件依赖
         sed -i "/AndResGuard-gradle-plugin/d" build.gradle
         sed -i "/android-apt/d" build.gradle
-        
-        # 3.3: 修改 app/build.gradle，移除失效插件，并将 'apt' 替换为 'annotationProcessor'
-        echo ">> 3. Patching app/build.gradle..."
-        sed -i "/apply plugin: 'com.neenbedankt.android-apt'/d" app/build.gradle
-        sed -i "/apply plugin: 'AndResGuard'/d" app/build.gradle
-        sed -i "s/apt /annotationProcessor /" app/build.gradle
-        sed -i '/andResGuard {/,/}/d' app/build.gradle
-        
-        echo ">> Gradle files have been surgically modified for compatibility."
 
-    # 4. 授予 gradlew 执行权限
+    # 5. 【高智商步骤】用 Python 精准手术 app/build.gradle
+    # 彻底解决 sed 删不干净嵌套花括号的问题
+    - name: Surgically Patch app/build.gradle
+      shell: python
+      run: |
+        import re
+
+        file_path = 'app/build.gradle'
+        with open(file_path, 'r') as f:
+            lines = f.readlines()
+
+        new_lines = []
+        skip_mode = False
+        brace_level = 0
+
+        print(f"Processing {file_path}...")
+
+        for line in lines:
+            # 1. 移除失效的 apply plugin
+            if "apply plugin" in line and ("AndResGuard" in line or "android-apt" in line):
+                print(f"Removing plugin: {line.strip()}")
+                continue
+
+            # 2. 检测并移除 andResGuard 配置块 (支持嵌套括号)
+            if "andResGuard {" in line and not skip_mode:
+                print("Found andResGuard block, starting removal...")
+                skip_mode = True
+                brace_level += line.count('{')
+                brace_level -= line.count('}')
+                if brace_level == 0: skip_mode = False
+                continue
+
+            if skip_mode:
+                brace_level += line.count('{')
+                brace_level -= line.count('}')
+                if brace_level <= 0:
+                    print("End of andResGuard block.")
+                    skip_mode = False
+                continue
+
+            # 3. 替换 apt 为 annotationProcessor (保留其他内容)
+            # 使用正则精准替换单词边界的 apt
+            new_line = re.sub(r'\bapt\s+', 'annotationProcessor ', line)
+            
+            new_lines.append(new_line)
+
+        with open(file_path, 'w') as f:
+            f.writelines(new_lines)
+        
+        print("Done. File patched.")
+
+    # 6. 赋予 gradlew 执行权限
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # 5. 编译项目 (如果再失败，日志会告诉我们新的问题)
+    # 7. 编译 (加 stacktrace 方便看还有什么幺蛾子)
     - name: Build with Gradle
       run: ./gradlew assembleDebug --stacktrace
 
-    # 6. 上传编译产物 (APK)
+    # 8. 上传 APK
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
