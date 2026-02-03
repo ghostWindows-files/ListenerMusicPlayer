@@ -15,7 +15,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 2. 设置 JDK 8 (老项目必须)
+    # 2. 设置 JDK 8 (配合 Gradle 2.14 必须用这个)
     - name: Set up JDK 8
       uses: actions/setup-java@v4
       with:
@@ -23,82 +23,49 @@ jobs:
         distribution: 'temurin'
         cache: 'gradle'
 
-    # 3. 升级 Gradle Wrapper (2.14 -> 4.10.1)
-    - name: Upgrade Gradle Wrapper
-      run: |
-        sed -i 's/gradle-2.14.1-all.zip/gradle-4.10.1-all.zip/' gradle/wrapper/gradle-wrapper.properties
-
-    # 4. 修复根目录 build.gradle (仓库 & 插件版本)
-    - name: Patch root build.gradle
-      run: |
-        # 替换 jcenter 为 google + mavenCentral
-        sed -i 's/jcenter()/google()\n        mavenCentral()/' build.gradle
-        # 升级 Android Gradle 插件 2.2.0 -> 3.3.2
-        sed -i "s/com.android.tools.build:gradle:2.2.0/com.android.tools.build:gradle:3.3.2/" build.gradle
-        # 删除根目录失效插件依赖
-        sed -i "/AndResGuard-gradle-plugin/d" build.gradle
-        sed -i "/android-apt/d" build.gradle
-
-    # 5. 【高智商步骤】用 Python 精准手术 app/build.gradle
-    # 彻底解决 sed 删不干净嵌套花括号的问题
-    - name: Surgically Patch app/build.gradle
+    # 3. 【核心步骤】使用 Python 脚本精准替换仓库源
+    # 不删任何插件，只是把下载地址指向阿里云
+    - name: Switch to Aliyun Mirrors
       shell: python
       run: |
-        import re
+        import os
 
-        file_path = 'app/build.gradle'
-        with open(file_path, 'r') as f:
-            lines = f.readlines()
+        # 定义阿里云的仓库配置（包含 Google 和 JCenter/Central 的镜像）
+        aliyun_repos = """
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        """
 
-        new_lines = []
-        skip_mode = False
-        brace_level = 0
-
-        print(f"Processing {file_path}...")
-
-        for line in lines:
-            # 1. 移除失效的 apply plugin
-            if "apply plugin" in line and ("AndResGuard" in line or "android-apt" in line):
-                print(f"Removing plugin: {line.strip()}")
-                continue
-
-            # 2. 检测并移除 andResGuard 配置块 (支持嵌套括号)
-            if "andResGuard {" in line and not skip_mode:
-                print("Found andResGuard block, starting removal...")
-                skip_mode = True
-                brace_level += line.count('{')
-                brace_level -= line.count('}')
-                if brace_level == 0: skip_mode = False
-                continue
-
-            if skip_mode:
-                brace_level += line.count('{')
-                brace_level -= line.count('}')
-                if brace_level <= 0:
-                    print("End of andResGuard block.")
-                    skip_mode = False
-                continue
-
-            # 3. 替换 apt 为 annotationProcessor (保留其他内容)
-            # 使用正则精准替换单词边界的 apt
-            new_line = re.sub(r'\bapt\s+', 'annotationProcessor ', line)
-            
-            new_lines.append(new_line)
-
-        with open(file_path, 'w') as f:
-            f.writelines(new_lines)
+        file_path = 'build.gradle'
         
-        print("Done. File patched.")
+        print(f"Reading {file_path}...")
+        with open(file_path, 'r') as f:
+            content = f.read()
 
-    # 6. 赋予 gradlew 执行权限
+        # 将所有的 jcenter() 替换为阿里云镜像
+        if 'jcenter()' in content:
+            new_content = content.replace('jcenter()', aliyun_repos)
+            
+            with open(file_path, 'w') as f:
+                f.write(new_content)
+            print("SUCCESS: Replaced jcenter() with Aliyun mirrors.")
+        else:
+            print("WARNING: jcenter() not found, skipping replacement.")
+            
+        # 顺便打印一下修改后的文件，方便你在日志里检查
+        print("-" * 20)
+        print(new_content)
+        print("-" * 20)
+
+    # 4. 赋予 gradlew 执行权限
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # 7. 编译 (加 stacktrace 方便看还有什么幺蛾子)
+    # 5. 编译 (带堆栈日志，方便排错)
     - name: Build with Gradle
       run: ./gradlew assembleDebug --stacktrace
 
-    # 8. 上传 APK
+    # 6. 上传 APK
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
