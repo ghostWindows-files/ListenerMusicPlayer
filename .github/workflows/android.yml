@@ -11,11 +11,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. 检出代码 (升级到 v4)
+    # 1. 下代码
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 2. 设置 JDK 8 (老项目必须用 JDK 8，否则 Gradle 会报错)
+    # 2. 设置 Java 8 (老古董项目必须用这个)
     - name: Set up JDK 8
       uses: actions/setup-java@v4
       with:
@@ -23,15 +23,23 @@ jobs:
         distribution: 'temurin'
         cache: 'gradle'
 
-    # 3. 赋予 gradlew 执行权限
+    # 3. 【关键一步】暴力修复 build.gradle
+    # 9年前还没有 google() 快捷方式，必须手动注入 maven url
+    # 这一步会把所有的 jcenter() 替换为包含 Google 源和 MavenCentral 的配置
+    - name: Patch build.gradle repositories
+      run: |
+        sed -i 's/jcenter()/maven { url "https:\/\/maven.google.com" }\n        mavenCentral()\n        jcenter()/g' build.gradle
+        cat build.gradle # 打印出来给你看看改成了啥样
+
+    # 4. 给脚本执行权限
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # 4. 编译 (使用 assembleDebug)
+    # 5. 编译 (带上 stacktrace 看看到底哪里还有坑)
     - name: Build with Gradle
       run: ./gradlew assembleDebug --stacktrace
-      
-    # 5. 上传 APK (关键修正：升级到 v4)
+
+    # 6. 上传 APK
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
